@@ -63,8 +63,8 @@ class Bill_HttpRequest:
                 # Limite consumidor final
                 if doc_tipo == 99 and metodo_pago == 1 and importe_total >= 208644:
                         raise ValueError("❌ No se puede facturar a un consumidor final más de $208.644 ARS en efectivo.")
-                if doc_tipo == 99 and metodo_pago == 1 and importe_total >= 417288:
-                        return f"Error: No se puede facturar a un consumidor final mas de $417.288 ARS."
+                if doc_tipo == 99 and metodo_pago in [2,3,4,5] and importe_total >= 417288:
+                        raise ValueError("❌ No se puede facturar a un consumidor final más de $417.288 ARS con medios electrónicos.")
 
                 # Comprobante original (Notas de Crédito/Débito)
                 if factura_tipo not in [1, 6, 11]:  # No es factura A/B/C
