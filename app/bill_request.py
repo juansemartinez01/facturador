@@ -14,6 +14,7 @@ class Bill_HttpRequest:
                 importe_total_concepto: float, # Importe de operaciones no gravadas ni exentas, pero no sujetas a IVA (por ejemplo, intereses, multas).
                 cantidad_comprobantes: int = 1,
                 metodo_pago : int = 1, # 1 = Efectivo, 2 = Tarjeta de credito, 3 = Tarjeta de debito, 4 = Cheque, 5 = Transferencia bancaria
+                moneda_pago : str = "N", # "N" = Pesos, "S" = Dolares
                 # Datos Receptor
                 doc_tipo : int = 99, # 80 = CUIT, 96 = DNI, 99 = Consumidor Final
                 doc_nro : int = 0, # Si es consumidor final puede ser "0"
@@ -29,6 +30,8 @@ class Bill_HttpRequest:
                 importe_exento: float = 0, # Solo si hay productos exentos de IVA
                 importe_iva: float = 0,  # importe_neto * alicuota de iva 
                 importe_tributos: float = 0, # Total de otros tributos, como IIBB, tasas municipales
+                cond_iva_receptor: int = 5, # 1	IVA Responsable Inscripto (A/M/C),6	Responsable Monotributo (A/M/C),13	Monotributista Social (A/M/C),16	Monotributo Trabajador Independiente Promovido,4	IVA Sujeto Exento (B/C),5	Consumidor Final (B/C),7	Sujeto No Categorizado (B/C),8	Proveedor del Exterior (B/C),9	Cliente del Exterior (B/C),10	IVA Liberado – Ley 19.640 (B/C),15	IVA No Alcanzado (B/C)
+                
                 # Nota de credito/debito
                 tipo_comprobante_original: int = 1,
                 pto_venta_original: int = 0,
@@ -46,12 +49,14 @@ class Bill_HttpRequest:
                 # Receptor
                 self.doc_tipo = doc_tipo
                 self.doc_nro = doc_nro
+                self.cond_iva_receptor = cond_iva_receptor
 
                 # Factura
                 self.factura_tipo = factura_tipo
                 self.nro_comprobante = nro_comprobante
                 self.fecha_comprobante = fecha_comprobante
                 self.moneda = moneda
+                self.moneda_pago = moneda_pago
                 self.cotizacion = cotizacion
                 self.concepto = concepto
                 self.importe_total = importe_total
@@ -116,6 +121,8 @@ class Bill_HttpRequest:
                                         <ar:FchVtoPago></ar:FchVtoPago>
                                         <ar:MonId>{self.moneda}</ar:MonId>
                                         <ar:MonCotiz>{self.cotizacion}</ar:MonCotiz>
+                                        <ar:CondicionIVAReceptorId>{self.cond_iva_receptor}</ar:CondicionIVAReceptorId> 
+                                        <ar:CanMismoMonedaExt>{self.moneda_pago}</ar:CanMismoMonedaExt> 
                                 </ar:FECAEDetRequest>
                                 </ar:FeDetReq>
                                 </ar:FeCAEReq>
@@ -160,6 +167,8 @@ class Bill_HttpRequest:
                                                 <ar:FchVtoPago></ar:FchVtoPago>
                                                 <ar:MonId>{self.moneda}</ar:MonId>
                                                 <ar:MonCotiz>{self.cotizacion}</ar:MonCotiz>
+                                                <ar:CondicionIVAReceptorId>{self.cond_iva_receptor}</ar:CondicionIVAReceptorId> 
+                                                <ar:CanMismoMonedaExt>{self.moneda_pago}</ar:CanMismoMonedaExt>
                                                 <ar:CbtesAsoc>
                                                 <ar:CbteAsoc>
                                                         <ar:Tipo>{self.tipo_comprobante_original}</ar:Tipo>

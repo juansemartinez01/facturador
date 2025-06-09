@@ -5,12 +5,14 @@ import json
 import requests
 import logging
 import sys
+import tempfile
 import xml.etree.ElementTree as ET
+from pytz import timezone
 
 from sqlalchemy import create_engine, text
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
-from Facturador_ARCA_Monotributo.app.bill_request import Bill_HttpRequest
+from bill_request import Bill_HttpRequest
 
 logger = logging.getLogger("facturador_afip")
 logger.setLevel(logging.DEBUG)
@@ -28,168 +30,51 @@ class TokenSignManager:
             test : bool = True,
             service : str = "wsfe",
             POSTGRES_URL: str = "postgresql://afip_user:afip_pass@localhost:5432/afip_db", # Crear variable de entorno en vez de que este aca.
+            cert_content: str = None, # Abrir .crt en bloq de notas y copiar el texto.
+            key_content: str = None,
     ):
         self.cuit_emisor = cuit_emisor
         self.test = test
-        self.modo = "test" if test else "prod",
-        self.ta_path = f"./app/tmp/TA-{self.cuit_emisor}-{self.modo}.xml",
+        self.modo = "test" if test else "prod"
+        self.ta_path = f"./app/tmp/TA-{self.cuit_emisor}-{self.modo}.xml"
         self.service = service
         self.POSTGRES_URL = POSTGRES_URL
+        self.cert_content = cert_content
+        self.key_content = key_content
 
-    # def is_token_valid(self) -> bool:
-    #     if not os.path.exists(self.ta_path):
-    #         logger.warning(f"🔍 Archivo TA no encontrado: {self.ta_path}")
-    #         return False
-    #     try:
-    #         tree = ET.parse(self.ta_path)
-    #         root = tree.getroot()
-    #         expiration = root.find(".//expirationTime").text
-    #         expiration_dt = datetime.strptime(expiration[:19], "%Y-%m-%dT%H:%M:%S")
-    #         now = datetime.now()
-    #         is_valid = now < expiration_dt
-    #         if is_valid:
-    #             logger.info(f"✅ Token aún válido para {self.cuit_emisor} ({self.modo}). Expira: {expiration}")
-    #         else:
-    #             logger.warning(f"⏰ Token expirado para {self.cuit_emisor} ({self.modo}). Expiró: {expiration}")
-    #         return is_valid
-    #     except Exception as e:
-    #         logger.error(f"❌ Error leyendo TA.xml: {e}")
-    #         return False
+    def guardar_cert_db(self):
+        """
+        Guarda en la base de datos el contenido del certificado (.crt) y la clave privada (.pem)
+        recibidos como strings, asociados al CUIT y modo (test/prod). Si ya existe, los actualiza y renueva created_at.
+        """
+        POSTGRES_URL = os.getenv("POSTGRES_URL", "postgresql://afip_user:afip_pass@localhost:5432/afip_db")
 
-    # def obtener_nuevo_token_y_sign(self):
-    #     # cert_path, key_path, CUIT_emisor, service="wsfe", test=True
-        
-    #     if self.test:
-    #         wsaa_url = "https://wsaahomo.afip.gov.ar/ws/services/LoginCms"
-    #         cert_path = f"app/certs/{self.cuit_emisor}/certificado_test.crt"
-    #         key_path = f"app/certs/{self.cuit_emisor}/private_key_test.pem"
-    #     else:
-    #         wsaa_url = "https://wsaa.afip.gov.ar/ws/services/LoginCms"
-    #         cert_path = f"app/certs/{self.cuit_emisor}/certificado_prod.crt"
-    #         key_path = f"app/certs/{self.cuit_emisor}/private_key_prod.pem"
+        try:
+            modo = "test" if self.test else "prod"
+            now = datetime.now()
 
-    #     # === 1. Crear TRA.xml como string
-    #     generation_time = (datetime.now() - timedelta(minutes=10)).strftime("%Y-%m-%dT%H:%M:%S")
-    #     expiration_time = (datetime.now() + timedelta(minutes=10)).strftime("%Y-%m-%dT%H:%M:%S")
-    #     tra_xml = f"""<?xml version="1.0" encoding="UTF-8"?>
-    # <loginTicketRequest version="1.0">
-    # <header>
-    #     <uniqueId>{int(datetime.now().timestamp())}</uniqueId>
-    #     <generationTime>{generation_time}</generationTime>
-    #     <expirationTime>{expiration_time}</expirationTime>
-    # </header>
-    # <service>{self.service}</service>
-    # </loginTicketRequest>
-    # """
+            engine = create_engine(POSTGRES_URL)
+            with engine.begin() as conn:
+                conn.execute(text("""
+                    INSERT INTO certs (cuit_emisor, modo, cert, private_key, created_at)
+                    VALUES (:cuit_emisor, :modo, :cert, :private_key, :created_at)
+                    ON CONFLICT (cuit_emisor, modo) DO UPDATE
+                    SET cert = EXCLUDED.cert,
+                        private_key = EXCLUDED.private_key,
+                        created_at = EXCLUDED.created_at
+                """), {
+                    "cuit_emisor": self.cuit_emisor,
+                    "modo": modo,
+                    "cert": self.cert_content,
+                    "private_key": self.key_content,
+                    "created_at": now
+                })
 
-    #     # === 2. Ejecutar openssl smime con entrada/salida en memoria
-    #     openssl_cmd = [
-    #         "openssl", "smime", "-sign",
-    #         "-signer", cert_path,
-    #         "-inkey", key_path,
-    #         "-outform", "DER",
-    #         "-nodetach"
-    #     ]
+            logger.info("✅ Certificado y clave guardados correctamente en la base de datos.")
 
-    #     try:
-    #         proc = subprocess.Popen(openssl_cmd, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-    #         cms_data, stderr = proc.communicate(input=tra_xml.encode("utf-8"))
+        except Exception as e:
+            logger.exception("❌ Error al guardar en DB")
 
-    #         if proc.returncode != 0:
-    #             raise Exception(f"OpenSSL error: {stderr.decode()}")
-
-    #     except Exception as e:
-    #         logger.error(f"❌ Error firmando el TRA con OpenSSL: {e}")
-    #         return None
-
-    #     # === 3. Codificar CMS en base64
-    #     cms_encoded = base64.b64encode(cms_data).decode()
-
-    #     # === 4. Crear request SOAP
-    #     soap_request = f"""<?xml version="1.0" encoding="UTF-8"?>
-    # <soapenv:Envelope xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/"
-    #                 xmlns:ser="http://wsaa.view.sua.dvadac.desein.afip.gov">
-    # <soapenv:Header/>
-    # <soapenv:Body>
-    #     <ser:loginCms>
-    #     <request>{cms_encoded}</request>
-    #     </ser:loginCms>
-    # </soapenv:Body>
-    # </soapenv:Envelope>
-    # """
-
-    #     headers = {
-    #         "Content-Type": "text/xml; charset=utf-8",
-    #         "SOAPAction": "loginCms"
-    #     }
-
-    #     # === 5. Enviar request al WSAA
-    #     response = requests.post(wsaa_url, data=soap_request.encode("utf-8"), headers=headers)
-
-    #     if response.status_code != 200:
-    #         logger.error("❌ Error en conexión o WSAA:")
-    #         logger.debug(response.text[:1000])
-    #         return None
-
-    #     # === 6. Parsear TA.xml desde la respuesta
-    #     soap_tree = ET.fromstring(response.text)
-    #     ns = {"soap": "http://schemas.xmlsoap.org/soap/envelope/"}
-    #     ta_xml_str = soap_tree.find(".//soap:Body/*/*", namespaces=ns).text
-
-    #     ta_tree = ET.fromstring(ta_xml_str)
-    #     token = ta_tree.find(".//token").text
-    #     sign = ta_tree.find(".//sign").text
-    #     expiration = ta_tree.find(".//expirationTime").text
-
-    #     # === 7. Guardar TA.xml personalizado
-    #     suffix = "-test" if self.test else ""
-    #     ta_filename = f"/tmp/TA-{self.cuit_emisor}{suffix}.xml"
-
-    #     try:
-    #         with open(ta_filename, "w", encoding="utf-8") as f:
-    #             f.write(ta_xml_str)
-    #         logger.info(f"✅ TOKEN y SIGN extraídos y guardados en {ta_filename}")
-    #     except Exception as e:
-    #         logger.error(f"⚠️ No se pudo guardar el TA.xml: {e}")
-
-    #     return {
-    #         "token": token,
-    #         "sign": sign,
-    #         "expiration": expiration,
-    #         "ta_xml": ta_xml_str,
-    #         "ta_path": ta_filename
-    #     }
-    # def obtener_token_sign(self):
-    #     # === Paths dinámicos según test/prod ===
-    #     if self.test:
-    #         wsaa_url = "https://wsaahomo.afip.gov.ar/ws/services/LoginCms"
-    #         cert_path = f"app/certs/{self.cuit_emisor}/certificado_test.crt"
-    #         key_path = f"app/certs/{self.cuit_emisor}/private_key_test.pem"
-    #     else:
-    #         wsaa_url = "https://wsaa.afip.gov.ar/ws/services/LoginCms"
-    #         cert_path = f"app/certs/{self.cuit_emisor}/certificado_prod.crt"
-    #         key_path = f"app/certs/{self.cuit_emisor}/private_key_prod.pem"
-    #     """
-    #     Obtener el token y sign para el servicio wsfe de AFIP.
-    #     Si el token es válido, lo devuelve. Si no, obtiene uno nuevo.
-    #     """
-    #     if self.is_token_valid():
-    #         logger.info("✅ TOKEN y SIGN válidos.")
-    #         with open(self.ta_path, "r") as f:
-    #             ta_xml_str = f.read()
-    #         ta_tree = ET.fromstring(ta_xml_str)
-    #         token = ta_tree.find(".//token").text
-    #         sign = ta_tree.find(".//sign").text
-    #         expiration_time = ta_tree.find(".//expirationTime").text
-    #         return {
-    #             "token": token,
-    #             "sign": sign,
-    #             "expiration": expiration_time,
-    #             "ta_xml": ta_xml_str
-    #         }
-    #     else:
-    #         logger.info("TOKEN y SIGN vencidos. Obteniendo uno nuevo...")
-    #         return self.obtener_nuevo_token_y_sign()
 
     def is_token_valid(self) -> bool:
         try:
@@ -227,21 +112,61 @@ class TokenSignManager:
             return False
         
     def obtener_nuevo_token_y_sign(self):
-        # === Paths dinámicos según test/prod ===
-        if self.test:
-            wsaa_url = "https://wsaahomo.afip.gov.ar/ws/services/LoginCms"
-            cert_path = f"app/certs/{self.cuit_emisor}/certificado_test.crt"
-            key_path = f"app/certs/{self.cuit_emisor}/private_key_test.pem"
-        else:
-            wsaa_url = "https://wsaa.afip.gov.ar/ws/services/LoginCms"
-            cert_path = f"app/certs/{self.cuit_emisor}/certificado_prod.crt"
-            key_path = f"app/certs/{self.cuit_emisor}/private_key_prod.pem"
+        wsaa_url = (
+            "https://wsaahomo.afip.gov.ar/ws/services/LoginCms"
+            if self.test else
+            "https://wsaa.afip.gov.ar/ws/services/LoginCms"
+        )
+        modo = "test" if self.test else "prod"
 
-        # === 1. Crear TRA.xml como string
-        generation_dt = datetime.now()
-        generation_time = (generation_dt - timedelta(minutes=10)).strftime("%Y-%m-%dT%H:%M:%S")
-        expiration_dt = (generation_dt + timedelta(minutes=10)).strftime("%Y-%m-%dT%H:%M:%S")
-        tra_xml = f"""<?xml version="1.0" encoding="UTF-8"?>
+        # === 1. Leer certificado y clave desde DB
+        try:
+            engine = create_engine(os.getenv("POSTGRES_URL", self.POSTGRES_URL))
+            with engine.connect() as conn:
+                result = conn.execute(text("""
+                    SELECT cert, private_key FROM certs
+                    WHERE cuit_emisor = :cuit_emisor AND modo = :modo
+                    LIMIT 1
+                """), {
+                    "cuit_emisor": self.cuit_emisor,
+                    "modo": modo
+                })
+                row = result.fetchone()
+                if not row:
+                    logger.error(f"❌ No se encontraron certificados en DB para {self.cuit_emisor} ({modo})")
+                    return None
+                cert_content, key_content = row
+        except Exception as e:
+            logger.error(f"❌ Error al leer certificados desde DB: {e}")
+            return None
+
+        # === 2. Crear archivos temporales en app/tmp
+        tmp_dir = "app/tmp"
+        try:
+            os.makedirs(tmp_dir, exist_ok=True)
+            logger.debug(f"📁 Carpeta temporal asegurada: {tmp_dir}")
+        except Exception as e:
+            logger.error(f"❌ No se pudo crear carpeta temporal {tmp_dir}: {e}")
+            return None
+
+        cert_path = os.path.join(tmp_dir, f"cert_{self.cuit_emisor}_{modo}.crt")
+        key_path = os.path.join(tmp_dir, f"key_{self.cuit_emisor}_{modo}.pem")
+
+        try:
+            with open(cert_path, "w") as f:
+                f.write(cert_content)
+            with open(key_path, "w") as f:
+                f.write(key_content)
+        except Exception as e:
+            logger.error("❌ No se pudo escribir archivos temporales de certificado:", exc_info=e)
+            return None
+
+        try:
+            # === 3. Crear TRA.xml
+            generation_dt = datetime.now()
+            generation_time = (generation_dt - timedelta(minutes=10)).strftime("%Y-%m-%dT%H:%M:%S")
+            expiration_dt = (generation_dt + timedelta(minutes=10)).strftime("%Y-%m-%dT%H:%M:%S")
+            tra_xml = f"""<?xml version="1.0" encoding="UTF-8"?>
     <loginTicketRequest version="1.0">
     <header>
         <uniqueId>{int(generation_dt.timestamp())}</uniqueId>
@@ -252,28 +177,22 @@ class TokenSignManager:
     </loginTicketRequest>
     """
 
-        # === 2. Ejecutar OpenSSL para firmar el XML
-        openssl_cmd = [
-            "openssl", "smime", "-sign",
-            "-signer", cert_path,
-            "-inkey", key_path,
-            "-outform", "DER",
-            "-nodetach"
-        ]
-
-        try:
+            # === 4. Firmar el TRA
+            openssl_cmd = [
+                "openssl", "smime", "-sign",
+                "-signer", cert_path,
+                "-inkey", key_path,
+                "-outform", "DER",
+                "-nodetach"
+            ]
             proc = subprocess.Popen(openssl_cmd, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
             cms_data, stderr = proc.communicate(input=tra_xml.encode("utf-8"))
             if proc.returncode != 0:
                 raise Exception(f"OpenSSL error: {stderr.decode()}")
-        except Exception as e:
-            logger.error("❌ Error firmando el TRA con OpenSSL:", exc_info=e)
-            return None
 
-        # === 3. Codificar CMS en base64 y armar request
-        cms_encoded = base64.b64encode(cms_data).decode()
-
-        soap_request = f"""<?xml version="1.0" encoding="UTF-8"?>
+            # === 5. Armar SOAP
+            cms_encoded = base64.b64encode(cms_data).decode()
+            soap_request = f"""<?xml version="1.0" encoding="UTF-8"?>
     <soapenv:Envelope xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/"
                     xmlns:ser="http://wsaa.view.sua.dvadac.desein.afip.gov">
     <soapenv:Header/>
@@ -284,59 +203,70 @@ class TokenSignManager:
     </soapenv:Body>
     </soapenv:Envelope>
     """
+            headers = {
+                "Content-Type": "text/xml; charset=utf-8",
+                "SOAPAction": "loginCms"
+            }
 
-        headers = {
-            "Content-Type": "text/xml; charset=utf-8",
-            "SOAPAction": "loginCms"
-        }
+            # === 6. Enviar solicitud
+            response = requests.post(wsaa_url, data=soap_request.encode("utf-8"), headers=headers)
+            if response.status_code != 200:
+                logger.error(f"❌ Error en conexión o WSAA. Código HTTP: {response.status_code}")
+                logger.debug("🧾 Respuesta completa del WSAA:")
+                logger.debug(response.text)
+                return None
 
-        # === 4. Enviar request al WSAA
-        response = requests.post(wsaa_url, data=soap_request.encode("utf-8"), headers=headers)
+            # === 7. Parsear respuesta
+            soap_tree = ET.fromstring(response.text)
+            ns = {"soap": "http://schemas.xmlsoap.org/soap/envelope/"}
+            ta_xml_str = soap_tree.find(".//soap:Body/*/*", namespaces=ns).text
+            ta_tree = ET.fromstring(ta_xml_str)
+            token = ta_tree.find(".//token").text
+            sign = ta_tree.find(".//sign").text
+            expiration_time_str = ta_tree.find(".//expirationTime").text
+            expiration_time = datetime.strptime(expiration_time_str[:19], "%Y-%m-%dT%H:%M:%S")
 
-        if response.status_code != 200:
-            logger.error("❌ Error en conexión o WSAA:")
-            logger.debug(response.text[:1000])
-            return None
-
-        # === 5. Parsear respuesta del WSAA
-        soap_tree = ET.fromstring(response.text)
-        ns = {"soap": "http://schemas.xmlsoap.org/soap/envelope/"}
-        ta_xml_str = soap_tree.find(".//soap:Body/*/*", namespaces=ns).text
-
-        ta_tree = ET.fromstring(ta_xml_str)
-        token = ta_tree.find(".//token").text
-        sign = ta_tree.find(".//sign").text
-        expiration_time_str = ta_tree.find(".//expirationTime").text
-        expiration_time = datetime.strptime(expiration_time_str[:19], "%Y-%m-%dT%H:%M:%S")
-
-        # === 6. Guardar en PostgreSQL
-        try:
-            engine = create_engine(os.getenv("POSTGRES_URL"))
-            with engine.connect() as conn:
+            # === 8. Insertar o actualizar en PostgreSQL
+            with engine.begin() as conn:
                 conn.execute(text("""
                     INSERT INTO ta_info (cuit_emisor, modo, token, sign, expiration_time, generation_time)
                     VALUES (:cuit_emisor, :modo, :token, :sign, :expiration_time, :generation_time)
+                    ON CONFLICT (cuit_emisor, modo)
+                    DO UPDATE SET
+                        token = EXCLUDED.token,
+                        sign = EXCLUDED.sign,
+                        expiration_time = EXCLUDED.expiration_time,
+                        generation_time = EXCLUDED.generation_time
                 """), {
                     "cuit_emisor": self.cuit_emisor,
-                    "modo": "test" if self.test else "prod",
+                    "modo": modo,
                     "token": token,
                     "sign": sign,
                     "expiration_time": expiration_time,
                     "generation_time": generation_dt
                 })
             logger.info(f"✅ TOKEN y SIGN guardados en DB para CUIT {self.cuit_emisor}")
+
+            return {
+                "token": token,
+                "sign": sign,
+                "expiration": expiration_time,
+                "ta_xml": ta_xml_str
+            }
+
         except Exception as e:
-            logger.error("❌ Error guardando en la base de datos:", exc_info=e)
+            logger.error("❌ Error procesando WSAA:", exc_info=e)
             return None
 
-        # === 7. Retornar info
-        return {
-            "token": token,
-            "sign": sign,
-            "expiration": expiration_time,
-            "ta_xml": ta_xml_str
-        }
-    
+        finally:
+            # === 9. Eliminar archivos temporales
+            try:
+                os.remove(cert_path)
+                os.remove(key_path)
+                logger.debug(f"🧹 Archivos temporales eliminados: {cert_path}, {key_path}")
+            except Exception as cleanup_error:
+                logger.warning(f"⚠️ No se pudieron eliminar archivos temporales: {cleanup_error}")
+
     def obtener_token_sign(self):
         """
         Obtener el token y sign para el servicio wsfe de AFIP.
@@ -356,7 +286,7 @@ class TokenSignManager:
                     """), {
                         "cuit_emisor": self.cuit_emisor,
                         "modo": "test" if self.test else "prod"
-                    })
+                    }) 
                     row = result.fetchone()
                     if row:
                         logger.info(f"✅ TOKEN y SIGN recuperados de DB para CUIT {self.cuit_emisor}")
@@ -463,7 +393,7 @@ class FacturadorMonotributista:
         logger.info("🧾 Último comprobante emitido:", cbte_nro_anterior)
 
         cbte_nro_nuevo = cbte_nro_anterior + 1
-        fecha_cbte_dt = datetime.now(ZoneInfo("America/Argentina/Buenos_Aires"))
+        fecha_cbte_dt = datetime.now(timezone("America/Argentina/Buenos_Aires"))
         fecha_cbte = fecha_cbte_dt.strftime("%Y%m%d")
 
         importe_neto = self.importe_total
