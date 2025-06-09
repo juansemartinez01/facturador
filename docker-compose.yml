@@ -1,0 +1,29 @@
+version: '3.8'
+
+services:
+  facturador-monotributista-api:
+    container_name: facturador-monotributista-api
+    build: .
+    ports:
+      - "8001:8000"
+    environment:
+      - POSTGRES_URL=postgresql://afip_user:afip_pass@postgres:5432/afip_db
+    depends_on:
+      - postgres
+
+  postgres:
+    image: postgres:15
+    container_name: postgres_afip
+    restart: always
+    environment:
+      POSTGRES_USER: afip_user
+      POSTGRES_PASSWORD: afip_pass
+      POSTGRES_DB: afip_db
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./init-db:/docker-entrypoint-initdb.d
+
+volumes:
+  pgdata:
