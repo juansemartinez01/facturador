@@ -29,7 +29,7 @@ class TokenSignManager:
             cuit_emisor : int,
             test : bool = True,
             service : str = "wsfe",
-            POSTGRES_URL: str = "postgresql://afip_user:afip_pass@localhost:5432/afip_db", # Crear variable de entorno en vez de que este aca.
+            POSTGRES_URL: str = os.getenv("POSTGRES_URL", "postgresql://afip_user:afip_pass@localhost:5432/afip_db"), # Crear variable de entorno en vez de que este aca.
             cert_content: str = None, # Abrir .crt en bloq de notas y copiar el texto.
             key_content: str = None,
     ):
@@ -163,7 +163,8 @@ class TokenSignManager:
 
         try:
             # === 3. Crear TRA.xml
-            generation_dt = datetime.now()
+            arg_tz = ZoneInfo("America/Argentina/Buenos_Aires")
+            generation_dt = datetime.now(arg_tz)
             generation_time = (generation_dt - timedelta(minutes=10)).strftime("%Y-%m-%dT%H:%M:%S")
             expiration_dt = (generation_dt + timedelta(minutes=10)).strftime("%Y-%m-%dT%H:%M:%S")
             tra_xml = f"""<?xml version="1.0" encoding="UTF-8"?>
