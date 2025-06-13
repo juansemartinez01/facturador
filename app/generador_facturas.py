@@ -29,7 +29,9 @@ class TokenSignManager:
             cuit_emisor : int,
             test : bool = True,
             service : str = "wsfe",
-            POSTGRES_URL: str = os.getenv("POSTGRES_URL", "postgresql://afip_user:afip_pass@localhost:5432/afip_db"), # Crear variable de entorno en vez de que este aca.
+            POSTGRES_URL = os.getenv("POSTGRES_URL")
+            if not POSTGRES_URL:
+                raise Exception("❌ POSTGRES_URL no está definido en las variables de entorno")
             cert_content: str = None, # Abrir .crt en bloq de notas y copiar el texto.
             key_content: str = None,
     ):
@@ -47,7 +49,9 @@ class TokenSignManager:
         Guarda en la base de datos el contenido del certificado (.crt) y la clave privada (.pem)
         recibidos como strings, asociados al CUIT y modo (test/prod). Si ya existe, los actualiza y renueva created_at.
         """
-        POSTGRES_URL = os.getenv("POSTGRES_URL", "postgresql://afip_user:afip_pass@localhost:5432/afip_db")
+        POSTGRES_URL = os.getenv("POSTGRES_URL")
+        if not POSTGRES_URL:
+            raise Exception("❌ POSTGRES_URL no está definido en las variables de entorno")
 
         try:
             modo = "test" if self.test else "prod"
