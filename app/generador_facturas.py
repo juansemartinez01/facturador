@@ -29,12 +29,15 @@ class TokenSignManager:
             cuit_emisor : int,
             test : bool = True,
             service : str = "wsfe",
-            POSTGRES_URL = os.getenv("POSTGRES_URL")
-            if not POSTGRES_URL:
-                raise Exception("❌ POSTGRES_URL no está definido en las variables de entorno")
+            POSTGRES_URL: str = None,
             cert_content: str = None, # Abrir .crt en bloq de notas y copiar el texto.
             key_content: str = None,
     ):
+
+        if POSTGRES_URL is None:
+            POSTGRES_URL = os.getenv("POSTGRES_URL")
+        if not POSTGRES_URL:
+            raise Exception("❌ POSTGRES_URL no está definido en las variables de entorno")
         self.cuit_emisor = cuit_emisor
         self.test = test
         self.modo = "test" if test else "prod"
