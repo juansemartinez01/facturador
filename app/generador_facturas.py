@@ -313,22 +313,55 @@ class TokenSignManager:
 ################################################################################################
 ################################################################################################
 ################################################################################################
-class FacturadorMonotributista:
+class FacturadorWSFE:
     def __init__(
             self,
             token,
             sign,
-            cuit_emisor : int,
-            importe_total : float,
-            test : bool = True,
-            punto_venta : int = 1,
-            factura_tipo : int = 11,
-            metodo_pago : int = 1,
+            cuit_emisor: int,
+            importe_total: float,
+            test: bool = True,
+            punto_venta: int = 1,
+            factura_tipo: int = 11,
+            metodo_pago: int = 1,
+            importe_neto: float | None = None,
+            importe_iva: float = 0.0,
+            importe_total_concepto: float = 0.0,
+            importe_exento: float = 0.0,
+            importe_tributos: float = 0.0,
+            alicuotas_iva: list | None = None,
+            doc_tipo: int = 99,
+            doc_nro: int = 0,
+            cond_iva_receptor: int = 5,
+            concepto: int = 1,
+            moneda: str = "PES",
+            moneda_pago: str = "N",
+            cotizacion: str = "1",
+            tipo_comprobante_original: int | None = None,
+            pto_venta_original: int | None = None,
+            nro_comprobante_original: int | None = None,
+            cuit_receptor_comprobante_original: int | None = None,
     ):
         self.test = test
         self.cuit_emisor = cuit_emisor
         self.importe_total = importe_total
-        self.importe_neto = importe_total
+        self.importe_neto = importe_total if importe_neto is None else importe_neto
+        self.importe_iva = importe_iva
+        self.importe_total_concepto = importe_total_concepto
+        self.importe_exento = importe_exento
+        self.importe_tributos = importe_tributos
+        self.alicuotas_iva = alicuotas_iva or []
+        self.doc_tipo = doc_tipo
+        self.doc_nro = doc_nro
+        self.cond_iva_receptor = cond_iva_receptor
+        self.concepto = concepto
+        self.moneda = moneda
+        self.moneda_pago = moneda_pago
+        self.cotizacion = cotizacion
+        self.tipo_comprobante_original = tipo_comprobante_original
+        self.pto_venta_original = pto_venta_original
+        self.nro_comprobante_original = nro_comprobante_original
+        self.cuit_receptor_comprobante_original = cuit_receptor_comprobante_original
         self.punto_venta = punto_venta
         self.factura_tipo = factura_tipo
         self.metodo_pago = metodo_pago
@@ -397,7 +430,6 @@ class FacturadorMonotributista:
         fecha_cbte_dt = datetime.now(timezone("America/Argentina/Buenos_Aires"))
         fecha_cbte = fecha_cbte_dt.strftime("%Y%m%d")
 
-        importe_neto = self.importe_total
         # === 2. Crear SOAP request para FECAESolicitar ===
         bill = Bill_HttpRequest(
             CUIT_emisor=self.cuit_emisor,
@@ -406,9 +438,24 @@ class FacturadorMonotributista:
             punto_venta=self.punto_venta,
             cantidad_comprobantes=1,
             metodo_pago=self.metodo_pago,
+            moneda_pago=self.moneda_pago,
+            doc_tipo=self.doc_tipo,
+            doc_nro=self.doc_nro,
             importe_total=self.importe_total,
-            importe_neto=importe_neto,
-            importe_total_concepto=0,
+            importe_neto=self.importe_neto,
+            importe_total_concepto=self.importe_total_concepto,
+            importe_exento=self.importe_exento,
+            importe_iva=self.importe_iva,
+            importe_tributos=self.importe_tributos,
+            alicuotas_iva=self.alicuotas_iva,
+            cond_iva_receptor=self.cond_iva_receptor,
+            concepto=self.concepto,
+            moneda=self.moneda,
+            cotizacion=self.cotizacion,
+            tipo_comprobante_original=self.tipo_comprobante_original,
+            pto_venta_original=self.pto_venta_original,
+            nro_comprobante_original=self.nro_comprobante_original,
+            cuit_receptor_comprobante_original=self.cuit_receptor_comprobante_original,
             nro_comprobante=cbte_nro_nuevo,
             fecha_comprobante=fecha_cbte
         )

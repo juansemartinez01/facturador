@@ -28,8 +28,9 @@ class Bill_HttpRequest:
                 importe_total: float = 1000, # Sumatoria de todo 
                 importe_neto: float = 1000, # Productos sin IVA/ Precio de los productos
                 importe_exento: float = 0, # Solo si hay productos exentos de IVA
-                importe_iva: float = 0,  # importe_neto * alicuota de iva 
+                importe_iva: float = 0,  # importe_neto * alicuota de iva
                 importe_tributos: float = 0, # Total de otros tributos, como IIBB, tasas municipales
+                alicuotas_iva: list = None,
                 cond_iva_receptor: int = 5, # 1	IVA Responsable Inscripto (A/M/C),6	Responsable Monotributo (A/M/C),13	Monotributista Social (A/M/C),16	Monotributo Trabajador Independiente Promovido,4	IVA Sujeto Exento (B/C),5	Consumidor Final (B/C),7	Sujeto No Categorizado (B/C),8	Proveedor del Exterior (B/C),9	Cliente del Exterior (B/C),10	IVA Liberado – Ley 19.640 (B/C),15	IVA No Alcanzado (B/C)
                 
                 # Nota de credito/debito
@@ -63,7 +64,9 @@ class Bill_HttpRequest:
                 self.importe_total_concepto = importe_total_concepto
                 self.importe_neto = importe_neto
                 self.importe_exento = importe_exento
+                self.importe_iva = importe_iva
                 self.importe_tributos = importe_tributos
+                self.alicuotas_iva = alicuotas_iva or []
 
                 # Limite consumidor final
                 if doc_tipo == 99 and metodo_pago == 1 and importe_total >= 208644:
@@ -84,10 +87,27 @@ class Bill_HttpRequest:
                         self.cuit_receptor_comprobante_original = None
         
         def get_request(self):
-                if self.factura_tipo in [11]: # Factura C
-                        soap_request = f"""<?xml version="1.0" encoding="UTF-8"?>
-                        <soapenv:Envelope xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/"
-                                        xmlns:ar="http://ar.gov.afip.dif.FEV1/">
+            cbtes_asoc_xml = ""
+            if self.tipo_comprobante_original is not None:
+                cbtes_asoc_xml = f"""
+                                <ar:CbtesAsoc>
+                                <ar:CbteAsoc>
+                                        <ar:Tipo>{self.tipo_comprobante_original}</ar:Tipo>
+                                        <ar:PtoVta>{self.pto_venta_original}</ar:PtoVta>
+                                        <ar:Nro>{self.nro_comprobante_original}</ar:Nro>
+                                        <ar:Cuit>{self.cuit_receptor_comprobante_original}</ar:Cuit>
+                                </ar:CbteAsoc>
+                                </ar:CbtesAsoc>"""
+
+            iva_xml = ""
+            if self.alicuotas_iva:
+                alicuotas = []
+                for a in self.alicuotas_iva:
+                    alicuotas.append(f"<ar:AlicIva><ar:Id>{a['Id']}</ar:Id><ar:BaseImp>{a['BaseImp']}</ar:BaseImp><ar:Importe>{a['Importe']}</ar:Importe></ar:AlicIva>")
+                iva_xml = f"<ar:Iva>{''.join(alicuotas)}</ar:Iva>"
+
+            soap_request = f"""<?xml version=\"1.0\" encoding=\"UTF-8\"?>
+                        <soapenv:Envelope xmlns:soapenv=\"http://schemas.xmlsoap.org/soap/envelope/\" xmlns:ar=\"http://ar.gov.afip.dif.FEV1/\">
                         <soapenv:Header/>
                         <soapenv:Body>
                                 <ar:FECAESolicitar>
@@ -101,87 +121,34 @@ class Bill_HttpRequest:
                                                         <ar:CantReg>{self.cantidad_comprobantes}</ar:CantReg>
                                                         <ar:PtoVta>{self.punto_venta}</ar:PtoVta>
                                                         <ar:CbteTipo>{self.factura_tipo}</ar:CbteTipo>
-                                </ar:FeCabReq>
-                                <ar:FeDetReq>
-                                <ar:FECAEDetRequest>
-                                        <ar:Concepto>{self.concepto}</ar:Concepto>
-                                        <ar:DocTipo>{self.doc_tipo}</ar:DocTipo> 
-                                        <ar:DocNro>{self.doc_nro}</ar:DocNro>
-                                        <ar:CbteDesde>{self.nro_comprobante}</ar:CbteDesde>
-                                        <ar:CbteHasta>{self.nro_comprobante}</ar:CbteHasta>
-                                        <ar:CbteFch>{self.fecha_comprobante}</ar:CbteFch>
-                                        <ar:ImpTotal>{self.importe_total}</ar:ImpTotal>
-                                        <ar:ImpTotConc>0.00</ar:ImpTotConc>
-                                        <ar:ImpNeto>{self.importe_neto}</ar:ImpNeto>
-                                        <ar:ImpOpEx>0.00</ar:ImpOpEx>
-                                        <ar:ImpIVA>0.00</ar:ImpIVA>
-                                        <ar:ImpTrib>0.00</ar:ImpTrib>
-                                        <ar:FchServDesde></ar:FchServDesde>
-                                        <ar:FchServHasta></ar:FchServHasta>
-                                        <ar:FchVtoPago></ar:FchVtoPago>
-                                        <ar:MonId>{self.moneda}</ar:MonId>
-                                        <ar:MonCotiz>{self.cotizacion}</ar:MonCotiz>
-                                        <ar:CondicionIVAReceptorId>{self.cond_iva_receptor}</ar:CondicionIVAReceptorId> 
-                                        <ar:CanMismoMonedaExt>{self.moneda_pago}</ar:CanMismoMonedaExt> 
-                                </ar:FECAEDetRequest>
-                                </ar:FeDetReq>
-                                </ar:FeCAEReq>
-                                </ar:FECAESolicitar>
-                        </soapenv:Body>
-                        </soapenv:Envelope>
-                        """
-                elif self.factura_tipo in [12,13]: # Nota de Débito o Crédito C
-                        soap_request = f"""<?xml version="1.0" encoding="UTF-8"?>
-                                        <soapenv:Envelope xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/"
-                                                        xmlns:ar="http://ar.gov.afip.dif.FEV1/">
-                                        <soapenv:Header/>
-                                        <soapenv:Body>
-                                        <ar:FECAESolicitar>
-                                        <ar:Auth>
-                                                <ar:Token>{self.token}</ar:Token>
-                                                <ar:Sign>{self.sign}</ar:Sign>
-                                                <ar:Cuit>{self.CUIT_emisor}</ar:Cuit>
-                                        </ar:Auth>
-                                        <ar:FeCAEReq>
-                                                <ar:FeCabReq>
-                                                <ar:CantReg>{self.cantidad_comprobantes}</ar:CantReg>
-                                                <ar:PtoVta>{self.punto_venta}</ar:PtoVta>
-                                                <ar:CbteTipo>{self.factura_tipo}</ar:CbteTipo>
                                                 </ar:FeCabReq>
                                                 <ar:FeDetReq>
                                                 <ar:FECAEDetRequest>
-                                                <ar:Concepto>{self.concepto}</ar:Concepto>
-                                                <ar:DocTipo>{self.doc_tipo}</ar:DocTipo>
-                                                <ar:DocNro>{self.doc_nro}</ar:DocNro>
-                                                <ar:CbteDesde>{self.nro_comprobante}</ar:CbteDesde>
-                                                <ar:CbteHasta>{self.nro_comprobante}</ar:CbteHasta>
-                                                <ar:CbteFch>{self.fecha_comprobante}</ar:CbteFch>
-                                                <ar:ImpTotal>{self.importe_total}</ar:ImpTotal>
-                                                <ar:ImpTotConc>0.00</ar:ImpTotConc>
-                                                <ar:ImpNeto>{self.importe_total}</ar:ImpNeto>
-                                                <ar:ImpOpEx>0.00</ar:ImpOpEx>
-                                                <ar:ImpIVA>0.00</ar:ImpIVA>
-                                                <ar:ImpTrib>0.00</ar:ImpTrib>
-                                                <ar:FchServDesde></ar:FchServDesde>
-                                                <ar:FchServHasta></ar:FchServHasta>
-                                                <ar:FchVtoPago></ar:FchVtoPago>
-                                                <ar:MonId>{self.moneda}</ar:MonId>
-                                                <ar:MonCotiz>{self.cotizacion}</ar:MonCotiz>
-                                                <ar:CondicionIVAReceptorId>{self.cond_iva_receptor}</ar:CondicionIVAReceptorId> 
-                                                <ar:CanMismoMonedaExt>{self.moneda_pago}</ar:CanMismoMonedaExt>
-                                                <ar:CbtesAsoc>
-                                                <ar:CbteAsoc>
-                                                        <ar:Tipo>{self.tipo_comprobante_original}</ar:Tipo>
-                                                        <ar:PtoVta>{self.pto_venta_original}</ar:PtoVta>
-                                                        <ar:Nro>{self.nro_comprobante_original}</ar:Nro>
-                                                        <ar:Cuit>{self.cuit_receptor_comprobante_original}</ar:Cuit>
-                                                </ar:CbteAsoc>
-                                                </ar:CbtesAsoc>
+                                                        <ar:Concepto>{self.concepto}</ar:Concepto>
+                                                        <ar:DocTipo>{self.doc_tipo}</ar:DocTipo>
+                                                        <ar:DocNro>{self.doc_nro}</ar:DocNro>
+                                                        <ar:CbteDesde>{self.nro_comprobante}</ar:CbteDesde>
+                                                        <ar:CbteHasta>{self.nro_comprobante}</ar:CbteHasta>
+                                                        <ar:CbteFch>{self.fecha_comprobante}</ar:CbteFch>
+                                                        <ar:ImpTotal>{self.importe_total}</ar:ImpTotal>
+                                                        <ar:ImpTotConc>{self.importe_total_concepto}</ar:ImpTotConc>
+                                                        <ar:ImpNeto>{self.importe_neto}</ar:ImpNeto>
+                                                        <ar:ImpOpEx>{self.importe_exento}</ar:ImpOpEx>
+                                                        <ar:ImpIVA>{self.importe_iva}</ar:ImpIVA>
+                                                        <ar:ImpTrib>{self.importe_tributos}</ar:ImpTrib>
+                                                        <ar:FchServDesde></ar:FchServDesde>
+                                                        <ar:FchServHasta></ar:FchServHasta>
+                                                        <ar:FchVtoPago></ar:FchVtoPago>
+                                                        <ar:MonId>{self.moneda}</ar:MonId>
+                                                        <ar:MonCotiz>{self.cotizacion}</ar:MonCotiz>
+                                                        <ar:CondicionIVAReceptorId>{self.cond_iva_receptor}</ar:CondicionIVAReceptorId>
+                                                        <ar:CanMismoMonedaExt>{self.moneda_pago}</ar:CanMismoMonedaExt>
+                                                        {cbtes_asoc_xml}
+                                                        {iva_xml}
                                                 </ar:FECAEDetRequest>
                                                 </ar:FeDetReq>
                                         </ar:FeCAEReq>
-                                        </ar:FECAESolicitar>
-                                        </soapenv:Body>
-                                        </soapenv:Envelope>"""
-
-                return soap_request
+                                </ar:FECAESolicitar>
+                        </soapenv:Body>
+                        </soapenv:Envelope>"""
+            return soap_request
