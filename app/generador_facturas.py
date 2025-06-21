@@ -14,6 +14,24 @@ from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 from bill_request import Bill_HttpRequest
 
+import ssl
+from requests.adapters import HTTPAdapter
+from urllib3.poolmanager import PoolManager
+
+class CustomAdapter(HTTPAdapter):
+    def init_poolmanager(self, *args, **kwargs):
+        ctx = ssl.create_default_context()
+        ctx.set_ciphers('HIGH:!DH:!aNULL')
+        ctx.check_hostname = False  
+        ctx.verify_mode = ssl.CERT_NONE
+        kwargs['ssl_context'] = ctx
+        return super().init_poolmanager(*args, **kwargs)
+
+# Aplicar el adaptador personalizado a todas las requests
+session = requests.Session()
+session.mount("https://", CustomAdapter())
+
+# Configurar el logger
 logger = logging.getLogger("facturador_afip")
 logger.setLevel(logging.DEBUG)
 
@@ -210,7 +228,7 @@ class TokenSignManager:
             }
 
             # === 6. Enviar solicitud
-            response = requests.post(wsaa_url, data=soap_request.encode("utf-8"), headers=headers)
+            response = session.post(wsaa_url, data=soap_request.encode("utf-8"), headers=headers, verify=False)
             if response.status_code != 200:
                 logger.error(f"❌ Error en conexión o WSAA. Código HTTP: {response.status_code}")
                 logger.debug("🧾 Respuesta completa del WSAA:")
@@ -315,20 +333,20 @@ class TokenSignManager:
 ################################################################################################
 class FacturadorMonotributista:
     def __init__(
-            self,
-            token,
-            sign,
-            cuit_emisor : int,
-            importe_total : float,
-            test : bool = True,
-            punto_venta : int = 1,
-            factura_tipo : int = 11,
-            metodo_pago : int = 1,
+        self,
+        token,
+        sign,
+        cuit_emisor: int,
+        importe_total: float,
+        test: bool = True,
+        punto_venta: int = 1,
+        factura_tipo: int = 11,
+        metodo_pago: int = 1,
     ):
         self.test = test
         self.cuit_emisor = cuit_emisor
         self.importe_total = importe_total
-        self.importe_neto = importe_total
+        self.importe_neto = self.importe_total
         self.punto_venta = punto_venta
         self.factura_tipo = factura_tipo
         self.metodo_pago = metodo_pago
@@ -360,7 +378,13 @@ class FacturadorMonotributista:
         }
 
         url = "https://wswhomo.afip.gov.ar/wsfev1/service.asmx" if self.test else "https://servicios1.afip.gov.ar/wsfev1/service.asmx"
-        response = requests.post(url, data=soap_request.encode("utf-8"), headers=headers)
+
+        response = response = session.post(
+            url,
+            data=soap_request.encode("utf-8"),
+            headers=headers,
+            verify=False
+        )
 
         if response.status_code != 200:
             raise Exception(f"Error HTTP {response.status_code}: {response.text[:500]}")
@@ -368,14 +392,12 @@ class FacturadorMonotributista:
         ns = {"soap": "http://schemas.xmlsoap.org/soap/envelope/", "ar": "http://ar.gov.afip.dif.FEV1/"}
         tree = ET.fromstring(response.text)
 
-        # Verificar errores devueltos por AFIP
         error_nodo = tree.find(".//ar:Errors/ar:Err", namespaces=ns)
         if error_nodo is not None:
             code = error_nodo.find("ar:Code", namespaces=ns).text
             msg = error_nodo.find("ar:Msg", namespaces=ns).text
             raise Exception(f"AFIP Error {code}: {msg}")
 
-        # Extraer número de comprobante
         nodo = tree.find(".//ar:FECompUltimoAutorizadoResult/ar:CbteNro", namespaces=ns)
         if nodo is None:
             raise Exception("No se pudo obtener el número de comprobante autorizado.")
@@ -385,10 +407,8 @@ class FacturadorMonotributista:
             "cbte_tipo": self.factura_tipo,
             "nro_autorizado": int(nodo.text)
         }
-    
-    def emitir_factura_afip(self):
 
-        # === 1. Preparar datos de la factura ===
+    def emitir_factura_afip(self):
         ultimo = self.consultar_ultimo_numero_autorizado()
         cbte_nro_anterior = ultimo["nro_autorizado"]
         logger.info("🧾 Último comprobante emitido:", cbte_nro_anterior)
@@ -397,7 +417,6 @@ class FacturadorMonotributista:
         fecha_cbte_dt = datetime.now(timezone("America/Argentina/Buenos_Aires"))
         fecha_cbte = fecha_cbte_dt.strftime("%Y%m%d")
 
-        importe_neto = self.importe_total
         # === 2. Crear SOAP request para FECAESolicitar ===
         bill = Bill_HttpRequest(
             CUIT_emisor=self.cuit_emisor,
@@ -407,7 +426,7 @@ class FacturadorMonotributista:
             cantidad_comprobantes=1,
             metodo_pago=self.metodo_pago,
             importe_total=self.importe_total,
-            importe_neto=importe_neto,
+            importe_neto=self.importe_neto,
             importe_total_concepto=0,
             nro_comprobante=cbte_nro_nuevo,
             fecha_comprobante=fecha_cbte
@@ -422,12 +441,17 @@ class FacturadorMonotributista:
         }
 
         url = "https://wswhomo.afip.gov.ar/wsfev1/service.asmx" if self.test else "https://servicios1.afip.gov.ar/wsfev1/service.asmx"
-        response = requests.post(url, data=soap_request.encode("utf-8"), headers=headers)
+
+        response = session.post(
+            url,
+            data=soap_request.encode("utf-8"),
+            headers=headers,
+            verify=False
+        )
 
         if response.status_code != 200:
             raise Exception(f"❌ Error HTTP {response.status_code}: {response.text[:500]}")
 
-        # === 3. Parsear respuesta ===
         ns = {
             "soap": "http://schemas.xmlsoap.org/soap/envelope/",
             "ar": "http://ar.gov.afip.dif.FEV1/"
@@ -435,7 +459,6 @@ class FacturadorMonotributista:
 
         tree = ET.fromstring(response.text)
 
-        # 🔍 Verificar errores de AFIP
         error_nodo = tree.find(".//ar:Errors/ar:Err", namespaces=ns)
         if error_nodo is not None:
             code = error_nodo.find("ar:Code", namespaces=ns).text
@@ -471,7 +494,6 @@ class FacturadorMonotributista:
             json_qr = base64.urlsafe_b64encode(json.dumps(qr_data).encode()).decode()
             url_qr = f"https://www.afip.gob.ar/fe/qr/?p={json_qr}"
 
-            # Desde front o back del sistema tomar esta salida y guardarla en una DB.
             return {
                 "cae": cae,
                 "vencimiento": cae_vto,
@@ -479,7 +501,7 @@ class FacturadorMonotributista:
                 "fecha": fecha_cbte_dt.strftime("%Y-%m-%d"),
                 "qr_url": url_qr
             }
- 
+
         else:
             raise Exception("❌ Error al generar factura. Resultado: " + resultado + "\nRespuesta completa:\n" + response.text)
     
