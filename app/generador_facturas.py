@@ -334,12 +334,18 @@ class TokenSignManager:
 class FacturadorWSFE:
     def __init__(
             self,
+            # Datos emisor y compra
             token,
             sign,
             cuit_emisor: int,
             importe_total: float,
             test: bool = True,
             punto_venta: int = 1,
+            # Datos del receptor
+            doc_tipo: int = 99,
+            doc_nro: int = 0,
+            cond_iva_receptor: int = 5,
+            # Datos de la factura
             factura_tipo: int = 11,
             metodo_pago: int = 1,
             importe_neto: float | None = None,
@@ -348,13 +354,11 @@ class FacturadorWSFE:
             importe_exento: float = 0.0,
             importe_tributos: float = 0.0,
             alicuotas_iva: list | None = None,
-            doc_tipo: int = 99,
-            doc_nro: int = 0,
-            cond_iva_receptor: int = 5,
-            concepto: int = 1,
             moneda: str = "PES",
             moneda_pago: str = "N",
             cotizacion: str = "1",
+            concepto: int = 1,
+            # Nota de credito/debito
             tipo_comprobante_original: int | None = None,
             pto_venta_original: int | None = None,
             nro_comprobante_original: int | None = None,
@@ -532,10 +536,10 @@ class FacturadorWSFE:
                 "tipoCmp": self.factura_tipo,
                 "nroCmp": cbte_nro_nuevo,
                 "importe": self.importe_total,
-                "moneda": "PES",
-                "ctz": 1.0,
-                "tipoDocRec": 99,
-                "nroDocRec": 0,
+                "moneda": self.moneda,
+                "ctz": self.cotizacion,
+                "tipoDocRec": self.doc_tipo,
+                "nroDocRec": self.doc_nro,
                 "tipoCodAut": "E",
                 "codAut": int(cae)
             }

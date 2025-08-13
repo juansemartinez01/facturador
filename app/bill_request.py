@@ -18,6 +18,8 @@ class Bill_HttpRequest:
                 # Datos Receptor
                 doc_tipo : int = 99, # 80 = CUIT, 96 = DNI, 99 = Consumidor Final
                 doc_nro : int = 0, # Si es consumidor final puede ser "0"
+                cond_iva_receptor: int = 5, # 1	IVA Responsable Inscripto (A/M/C),6	Responsable Monotributo (A/M/C),13	Monotributista Social (A/M/C),16	Monotributo Trabajador Independiente Promovido,4	IVA Sujeto Exento (B/C),5	Consumidor Final (B/C),7	Sujeto No Categorizado (B/C),8	Proveedor del Exterior (B/C),9	Cliente del Exterior (B/C),10	IVA Liberado – Ley 19.640 (B/C),15	IVA No Alcanzado (B/C)
+                
                 # Datos Factura 
                 factura_tipo : int = 11, # FA=1 NotaDeb-A=2 NotaCred-A=3 FB=6 ND-B=7 NC-B=8 FC=11 ND-C=12 NC-C=13               
                 nro_comprobante : int =0,
@@ -30,9 +32,22 @@ class Bill_HttpRequest:
                 importe_exento: float = 0, # Solo si hay productos exentos de IVA
                 importe_iva: float = 0,  # importe_neto * alicuota de iva
                 importe_tributos: float = 0, # Total de otros tributos, como IIBB, tasas municipales
-                alicuotas_iva: list = None,
-                cond_iva_receptor: int = 5, # 1	IVA Responsable Inscripto (A/M/C),6	Responsable Monotributo (A/M/C),13	Monotributista Social (A/M/C),16	Monotributo Trabajador Independiente Promovido,4	IVA Sujeto Exento (B/C),5	Consumidor Final (B/C),7	Sujeto No Categorizado (B/C),8	Proveedor del Exterior (B/C),9	Cliente del Exterior (B/C),10	IVA Liberado – Ley 19.640 (B/C),15	IVA No Alcanzado (B/C)
+                alicuotas_iva: list = None, #Tabla de Id (alícuotas) más usadas (Libro IVA/WSFE): 3 → 0,00%- 4 → 10,50%- 5 → 21,00%- 6 → 27,00%- 8 → 5,00%- 9 → 2,50%- (“Exento” no va en <Iva>; se informa en ImpOpEx).
+                #Ejemplo alicuotas_iva:
+                #self.alicuotas_iva = [
+                #     {
+                #         "Id": 5,          # 21% → tabla AFIP: 5
+                #         "BaseImp": 10000.00,  # Neto gravado para esta alícuota
+                #         "Importe": 2100.00    # IVA calculado (BaseImp * 0.21)
+                #     },
+                #     {
+                #         "Id": 4,          # 10,5% → tabla AFIP: 4
+                #         "BaseImp": 5000.00,
+                #         "Importe": 525.00
+                #     }
+                # ]
                 
+
                 # Nota de credito/debito
                 tipo_comprobante_original: int = 1,
                 pto_venta_original: int = 0,
@@ -69,11 +84,9 @@ class Bill_HttpRequest:
                 self.alicuotas_iva = alicuotas_iva or []
 
                 # Limite consumidor final
-                if doc_tipo == 99 and metodo_pago == 1 and importe_total >= 208644:
-                        raise ValueError("❌ No se puede facturar a un consumidor final más de $208.644 ARS en efectivo.")
-                if doc_tipo == 99 and metodo_pago in [2,3,4,5] and importe_total >= 417288:
-                        raise ValueError("❌ No se puede facturar a un consumidor final más de $417.288 ARS con medios electrónicos.")
-
+                if doc_tipo == 99 and metodo_pago in [1,2,3,4,5] and importe_total >= 10000000:
+                        raise ValueError("❌ No se puede facturar a un consumidor final más de $10.000.000 ARS con medios electrónicos.")
+ 
                 # Comprobante original (Notas de Crédito/Débito)
                 if factura_tipo not in [1, 6, 11]:  # No es factura A/B/C
                         self.tipo_comprobante_original = tipo_comprobante_original
