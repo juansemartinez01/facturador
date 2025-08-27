@@ -5,7 +5,6 @@ import json
 import requests
 import logging
 import sys
-import tempfile
 import xml.etree.ElementTree as ET
 from pytz import timezone
 
@@ -18,18 +17,16 @@ import ssl
 from requests.adapters import HTTPAdapter
 from urllib3.poolmanager import PoolManager
 
-class CustomAdapter(HTTPAdapter):
+class UnsafeTLSAdapter(HTTPAdapter):
     def init_poolmanager(self, *args, **kwargs):
         ctx = ssl.create_default_context()
-        ctx.set_ciphers('HIGH:!DH:!aNULL')
-        ctx.check_hostname = False  
-        ctx.verify_mode = ssl.CERT_NONE
-        kwargs['ssl_context'] = ctx
+        ctx.set_ciphers("HIGH:!DH:!aNULL")
+        kwargs["ssl_context"] = ctx
         return super().init_poolmanager(*args, **kwargs)
 
 # Aplicar el adaptador personalizado a todas las requests
 session = requests.Session()
-session.mount("https://", CustomAdapter())
+session.mount("https://", UnsafeTLSAdapter())
 
 # Configurar el logger
 logger = logging.getLogger("facturador_afip")
@@ -176,7 +173,7 @@ class TokenSignManager:
             with open(key_path, "w") as f:
                 f.write(key_content)
         except Exception as e:
-            logger.error("❌ No se pudo escribir archivos temporales de certificado:", exc_info=e)
+            logger.error(f"❌ No se pudo escribir archivos temporales de certificado:{e}")
             return None
 
         try:
@@ -274,7 +271,7 @@ class TokenSignManager:
             }
 
         except Exception as e:
-            logger.error("❌ Error procesando WSAA:", exc_info=e)
+            logger.error(f"❌ Error procesando WSAA:{e}")
             return None
 
         finally:
@@ -318,7 +315,7 @@ class TokenSignManager:
                         logger.warning("❌ Token válido, pero no se encontró en la base de datos.")
                         return self.obtener_nuevo_token_y_sign()
             except Exception as e:
-                logger.error("❌ Error recuperando token/sign de la base de datos:", exc_info=e)
+                logger.error(f"❌ Error recuperando token/sign de la base de datos:{e}")
                 return self.obtener_nuevo_token_y_sign()
         else:
             logger.info("🔁 Token inválido o expirado. Solicitando uno nuevo...")
@@ -421,7 +418,7 @@ class FacturadorWSFE:
             url,
             data=soap_request.encode("utf-8"),
             headers=headers,
-            verify=False
+            verify=True
         )
 
         if response.status_code != 200:
@@ -449,7 +446,7 @@ class FacturadorWSFE:
     def emitir_factura_afip(self):
         ultimo = self.consultar_ultimo_numero_autorizado()
         cbte_nro_anterior = ultimo["nro_autorizado"]
-        logger.info("🧾 Último comprobante emitido:", cbte_nro_anterior)
+        logger.info(f"🧾 Último comprobante emitido: {cbte_nro_anterior}")
 
         cbte_nro_nuevo = cbte_nro_anterior + 1
         fecha_cbte_dt = datetime.now(timezone("America/Argentina/Buenos_Aires"))
@@ -499,7 +496,7 @@ class FacturadorWSFE:
             url,
             data=soap_request.encode("utf-8"),
             headers=headers,
-            verify=False
+            verify=True
         )
 
         if response.status_code != 200:
