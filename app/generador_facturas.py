@@ -17,7 +17,7 @@ import ssl
 from requests.adapters import HTTPAdapter
 from urllib3.poolmanager import PoolManager
 
-class UnsafeTLSAdapter(HTTPAdapter):
+class SafeTLSAdapter(HTTPAdapter):
     def init_poolmanager(self, *args, **kwargs):
         ctx = ssl.create_default_context()
         ctx.set_ciphers("HIGH:!DH:!aNULL")
@@ -26,7 +26,7 @@ class UnsafeTLSAdapter(HTTPAdapter):
 
 # Aplicar el adaptador personalizado a todas las requests
 session = requests.Session()
-session.mount("https://", UnsafeTLSAdapter())
+session.mount("https://", SafeTLSAdapter())
 
 # Configurar el logger
 logger = logging.getLogger("facturador_afip")
@@ -225,7 +225,7 @@ class TokenSignManager:
             }
 
             # === 6. Enviar solicitud
-            response = session.post(wsaa_url, data=soap_request.encode("utf-8"), headers=headers, verify=False)
+            response = session.post(wsaa_url, data=soap_request.encode("utf-8"), headers=headers, verify=True)
             if response.status_code != 200:
                 logger.error(f"❌ Error en conexión o WSAA. Código HTTP: {response.status_code}")
                 logger.debug("🧾 Respuesta completa del WSAA:")
